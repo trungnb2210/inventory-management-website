@@ -5,13 +5,17 @@ from datetime import datetime
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 stock = pd.read_csv('C:/Users/Admin/Downloads/stock.csv')
-train = pd.read_csv('D:/Funnyland/excel/traindata.csv')
-test = pd.read_csv('D:/Funnyland/excel/testdata.csv')
-holiday = pd.read_csv('D:/Funnyland/excel/trainhol.csv')
-holiday_test = pd.read_csv('D:/Funnyland/excel/testhol.csv')
+train22 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2022data.csv')
+train21 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2021data.csv')
+test = pd.read_csv('D:/Funnyland/inventory-management-website/excel/testdata.csv')
+holiday22 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2022hol.csv')
+holiday21 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2021hol.csv')
+holiday_test = pd.read_csv('D:/Funnyland/inventory-management-website/excel/testhol.csv')
 
+train = pd.concat([train21, train22], ignore_index=True)
 train['date'] = pd.to_datetime(train.date, format = '%d/%m/%Y')
 test['date'] = pd.to_datetime(test.date, format = '%d/%m/%Y')
+holiday = pd.concat([holiday21, holiday22], ignore_index=True)
 holiday['date'] = pd.to_datetime(holiday.date, format = '%d/%m/%Y')
 holiday_test['date'] = pd.to_datetime(holiday_test.date, format = '%d/%m/%Y')
 
@@ -21,7 +25,6 @@ test['bill'].fillna(method='ffill', inplace=True)
 test['date'].fillna(method='ffill', inplace=True)
 
 pivot_daily_train = train.pivot_table(index='date', columns='code', values='quantity', fill_value = 0, aggfunc='sum')
-
 
 all_dates = pd.date_range(start=pivot_daily_train.index.min(),
                           end=pivot_daily_train.index.max(),
@@ -50,7 +53,6 @@ holiday_test.fillna(0, inplace=True)
 holiday_test['holiday'] = holiday_test['holiday'].astype(int)
 
 train_sum_sales_col = pivot_daily_train.sum(axis=1)
-
 test_sum_sales_col = pivot_daily_test.sum(axis=1)
 
 train_sum_sales = pd.DataFrame({'index': pivot_daily_train['index'], 'sales': train_sum_sales_col})
@@ -58,6 +60,8 @@ test_sum_sales = pd.DataFrame({'index': pivot_daily_test['index'], 'sales': test
 
 train_merged_data = pd.merge(train_sum_sales, holiday, how='left', left_on='index', right_on='date')
 train_merged_data.drop(columns=['date'], inplace=True)
+print(train_merged_data['index'].min(), train_merged_data['index'].max(), (train_merged_data['index'].max() -train_merged_data['index'].min()))
+
 exog_train = train_merged_data.loc[:, ['index', 'holiday']]
 exog_train.set_index('index', inplace=True)
 
