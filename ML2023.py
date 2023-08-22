@@ -1,6 +1,5 @@
-# ML algorithm to take the sum of all sales within Smart Games Group of Toys and aim to predict the total sales of Smart Games
-# Taking aggregate remedy the issue of insufficient data however is not fully logical as certain toys line run out of production
-# Attempt to use holiday data as a lag feature
+# instead of taking aggregate, take one particular item that has been selling through out 2021 and 2022 up to 2023.
+# a long-term toy is SG 455. This toy has been sold across the firm over 2021 and 2022 so it will be take as an example for this algorithm
 
 import pandas as pd
 import numpy as np
@@ -11,17 +10,19 @@ from sklearn.metrics import mean_squared_error
 from sklearn.metrics import mean_absolute_error
 
 stock = pd.read_csv('C:/Users/Admin/Downloads/stock.csv')
+train23 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2023data.csv')
 train22 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2022data.csv')
 train21 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2021data.csv')
-test = pd.read_csv('D:/Funnyland/inventory-management-website/excel/testdata.csv')
+holiday23 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2023hol.csv')
 holiday22 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2022hol.csv')
 holiday21 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2021hol.csv')
+test = pd.read_csv('D:/Funnyland/inventory-management-website/excel/testdata.csv')
 holiday_test = pd.read_csv('D:/Funnyland/inventory-management-website/excel/testhol.csv')
 
-train = pd.concat([train21, train22], ignore_index=True)
+train = pd.concat([train21, train22, train23], ignore_index=True)
 train['date'] = pd.to_datetime(train.date, format = '%d/%m/%Y')
 test['date'] = pd.to_datetime(test.date, format = '%d/%m/%Y')
-holiday = pd.concat([holiday21, holiday22], ignore_index=True)
+holiday = pd.concat([holiday21, holiday22, holiday23], ignore_index=True)
 holiday['date'] = pd.to_datetime(holiday.date, format = '%d/%m/%Y')
 holiday_test['date'] = pd.to_datetime(holiday_test.date, format = '%d/%m/%Y')
 
@@ -30,12 +31,13 @@ train['date'].fillna(method='ffill', inplace=True)
 test['bill'].fillna(method='ffill', inplace=True)
 test['date'].fillna(method='ffill', inplace=True)
 
-pivot_daily_train = train.pivot_table(index='date', columns='code', values='quantity', fill_value = 0, aggfunc='sum')
+traindf = train[train['code'] == 'SG 455']
+
+pivot_daily_train = traindf.pivot_table(index='date', columns='code', values='quantity', fill_value = 0, aggfunc='sum')
 
 all_dates = pd.date_range(start=pivot_daily_train.index.min(),
                           end=pivot_daily_train.index.max(),
                           freq='D')
-
 
 pivot_daily_train = pivot_daily_train.reindex(all_dates, fill_value=0)
 pivot_daily_train.reset_index(inplace=True)
@@ -43,6 +45,8 @@ pivot_daily_train.reset_index(inplace=True)
 code_set = set(pivot_daily_train.columns) - {'index'}
 
 test_filtered = test[test['code'].isin(code_set)]
+# end_date = '2023-07-01'
+# test_filtered = test[(test['code'].isin(code_set)) & (test['date'] < end_date)]
 
 pivot_daily_test = test_filtered.pivot_table(index='date', columns='code', values='quantity', fill_value = 0, aggfunc='sum')
 
@@ -58,6 +62,8 @@ holiday['holiday'] = holiday['holiday'].astype(int)
 holiday_test.fillna(0, inplace=True)
 holiday_test['holiday'] = holiday_test['holiday'].astype(int)
 
+# holiday_test = holiday_test[holiday_test['date'] < end_date]
+
 train_sum_sales_col = pivot_daily_train.sum(axis=1)
 test_sum_sales_col = pivot_daily_test.sum(axis=1)
 
@@ -66,13 +72,14 @@ test_sum_sales = pd.DataFrame({'index': pivot_daily_test['index'], 'sales': test
 
 train_merged_data = pd.merge(train_sum_sales, holiday, how='left', left_on='index', right_on='date')
 train_merged_data.drop(columns=['date'], inplace=True)
-print(train_merged_data['index'].min(), train_merged_data['index'].max(), (train_merged_data['index'].max() -train_merged_data['index'].min()))
 
 exog_train = train_merged_data.loc[:, ['index', 'holiday']]
+print(exog_train)
 exog_train.set_index('index', inplace=True)
 
 test_merged_data = pd.merge(test_sum_sales, holiday_test, how='left', left_on='index', right_on='date')
 test_merged_data.drop(columns=['date'], inplace=True)
+
 exog_test = test_merged_data.loc[:, ['index', 'holiday']]
 exog_test.set_index('index', inplace=True)
 
@@ -80,12 +87,12 @@ train_aggregated = train_merged_data[['index','sales']].copy()
 train_aggregated.set_index('index', inplace=True)
 
 order = (2, 1, 1)
-seasonal_order = (2, 1, 1, 7)
+seasonal_order = (1, 1, 1, 7)
 
 sarima_model = SARIMAX(train_aggregated['sales'], exog=exog_train, order=order, seasonal_order=seasonal_order)
 sarima_result = sarima_model.fit()
 
-forecast_period = 90
+forecast_period = 31
 sarima_forecast = sarima_result.get_forecast(steps=forecast_period, exog=exog_test)
 
 predicted_values = sarima_forecast.predicted_mean.round().astype(int)
@@ -106,7 +113,7 @@ compare_data = pd.merge(test_aggregated, predictions, left_index=True, right_ind
 plt.figure(figsize=(12, 6))
 
 # Plot training data
-plt.plot(train_aggregated.index, train_aggregated['sales'], label='Training Data')
+# plt.plot(train_aggregated.index, train_aggregated['sales'], label='Training Data')
 
 # Plot actual test data
 plt.plot(test_aggregated.index, test_aggregated['sales'], label='Actual Test Data', color='orange')
@@ -116,8 +123,8 @@ plt.plot(compare_data.index, compare_data['predicted_sales'], label='Forecasted 
 plt.fill_between(compare_data.index, compare_data['lower sales'], compare_data['upper sales'], color='pink', alpha=0.2)
 
 # Plot holidays for training data
-train_holiday_dates = train_merged_data[train_merged_data['holiday'] == 1]['index']
-plt.scatter(train_holiday_dates, [max(train_aggregated['sales'])] * len(train_holiday_dates), color='green', marker='x', label='Holiday (Train)')
+# train_holiday_dates = train_merged_data[train_merged_data['holiday'] == 1]['index']
+# plt.scatter(train_holiday_dates, [max(train_aggregated['sales'])] * len(train_holiday_dates), color='green', marker='x', label='Holiday (Train)')
 
 # Plot holidays for test data
 test_holiday_dates = test_merged_data[test_merged_data['holiday'] == 1]['index']
