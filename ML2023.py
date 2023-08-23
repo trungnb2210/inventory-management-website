@@ -6,18 +6,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-from sklearn.metrics import mean_squared_error
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-stock = pd.read_csv('C:/Users/Admin/Downloads/stock.csv')
+stock = pd.read_csv('D:/Funnyland/inventory-management-website/excel/stock.csv')
 train23 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2023data.csv')
 train22 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2022data.csv')
 train21 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2021data.csv')
 holiday23 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2023hol.csv')
 holiday22 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2022hol.csv')
 holiday21 = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2021hol.csv')
-test = pd.read_csv('D:/Funnyland/inventory-management-website/excel/testdata.csv')
-holiday_test = pd.read_csv('D:/Funnyland/inventory-management-website/excel/testhol.csv')
+test = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2023Jultestdata.csv')
+holiday_test = pd.read_csv('D:/Funnyland/inventory-management-website/excel/2023Jultesthol.csv')
+
+item = 'SG 455'
+stock = stock[stock['code'] == item][['code', 'stock']]
+stock['stock'] = pd.to_numeric(stock['stock'], errors='coerce')
 
 train = pd.concat([train21, train22, train23], ignore_index=True)
 train['date'] = pd.to_datetime(train.date, format = '%d/%m/%Y')
@@ -31,7 +34,7 @@ train['date'].fillna(method='ffill', inplace=True)
 test['bill'].fillna(method='ffill', inplace=True)
 test['date'].fillna(method='ffill', inplace=True)
 
-traindf = train[train['code'] == 'SG 455']
+traindf = train[train['code'] == item]
 
 pivot_daily_train = traindf.pivot_table(index='date', columns='code', values='quantity', fill_value = 0, aggfunc='sum')
 
@@ -74,7 +77,6 @@ train_merged_data = pd.merge(train_sum_sales, holiday, how='left', left_on='inde
 train_merged_data.drop(columns=['date'], inplace=True)
 
 exog_train = train_merged_data.loc[:, ['index', 'holiday']]
-print(exog_train)
 exog_train.set_index('index', inplace=True)
 
 test_merged_data = pd.merge(test_sum_sales, holiday_test, how='left', left_on='index', right_on='date')
@@ -133,6 +135,53 @@ plt.scatter(test_holiday_dates, [max(train_aggregated['sales'])] * len(test_holi
 plt.title('Training and Forecasted Test Data with Holidays')
 plt.xlabel('Date')
 plt.ylabel('Sales')
+plt.legend()
+plt.show()
+
+# Initialize the stock level as of the first day of the forecast period
+n = 100
+stock_level, actual_stock_level = n, n
+# stock_level, actual_stock_level = stock['stock'].values[0], stock['stock'].values[0] 
+# Create lists to store stock levels and dates
+actual_stock_levels = [actual_stock_level]
+predicted_stock_levels = [stock_level]  # Initialize with the same initial stock level
+dates = [compare_data.index[0]]
+zero_stock_date = None
+
+# Calculate the stock levels for each day of the forecast period
+for i in range(1, forecast_period):
+    stock_level -= compare_data['predicted_sales'].iloc[i - 1]  # Decrease stock based on predictions
+    if stock_level <= 0 and zero_stock_date is None:
+        zero_stock_date = compare_data.index[i]
+    predicted_stock_levels.append(stock_level)  # Store predicted stock level
+    actual_stock_level -= test_aggregated['sales'].iloc[i - 1]  # Calculate actual stock level (assuming it decreases by 1 each day)
+    actual_stock_levels.append(actual_stock_level)  # Store actual stock level
+    dates.append(compare_data.index[i])
+
+# Plot actual and predicted stock levels over time
+plt.figure(figsize=(12, 6))
+
+# Plot actual stock level
+plt.plot(dates, actual_stock_levels, label='Actual Stock', color='orange')
+
+print(len(predicted_stock_levels))
+# Plot predicted stock level
+plt.plot(dates, predicted_stock_levels, label='Predicted Stock', color='red')
+
+plt.axhline(y=0, color='gray', linestyle='--', label='Zero Stock Level')
+if zero_stock_date:
+    plt.axvline(x=zero_stock_date, color='blue', linestyle='--', label='Zero Stock Date')
+    plt.annotate(
+        'Zero Stock Date:' + str(zero_stock_date.strftime('%d-%m-%Y')),
+        xy=(zero_stock_date, 0),
+        xytext=(50, 30),  # Offset for text position
+        textcoords='offset points',
+        arrowprops=dict(arrowstyle='->', color='green')
+    )
+    
+plt.title('Actual vs. Predicted Stock Levels')
+plt.xlabel('Date')
+plt.ylabel('Stock Quantity')
 plt.legend()
 plt.show()
 
