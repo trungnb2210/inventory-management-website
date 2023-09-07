@@ -35,7 +35,7 @@ test['bill'].fillna(method='ffill', inplace=True)
 test['date'].fillna(method='ffill', inplace=True)
 
 traindf = train[train['code'] == item]
-
+traindf.loc[:, 'revenue'] = pd.to_numeric(traindf['revenue'].str.replace(',', ''), errors='coerce', downcast='integer') / 1000
 pivot_daily_train = traindf.pivot_table(index='date', columns='code', values='quantity', fill_value = 0, aggfunc='sum')
 
 all_dates = pd.date_range(start=pivot_daily_train.index.min(),
@@ -50,8 +50,9 @@ code_set = set(pivot_daily_train.columns) - {'index'}
 test_filtered = test[test['code'].isin(code_set)]
 # end_date = '2023-07-01'
 # test_filtered = test[(test['code'].isin(code_set)) & (test['date'] < end_date)]
-
+test_filtered.loc[:, 'revenue'] = pd.to_numeric(test_filtered['revenue'].str.replace(',', ''), errors='coerce', downcast='integer') / 1000
 pivot_daily_test = test_filtered.pivot_table(index='date', columns='code', values='quantity', fill_value = 0, aggfunc='sum')
+
 
 all_dates_test= pd.date_range(start=pivot_daily_test.index.min(),
                               end=pivot_daily_test.index.max(),
@@ -82,8 +83,8 @@ exog_train.set_index('index', inplace=True)
 test_merged_data = pd.merge(test_sum_sales, holiday_test, how='left', left_on='index', right_on='date')
 test_merged_data.drop(columns=['date'], inplace=True)
 
-exog_test = test_merged_data.loc[:, ['index', 'holiday']]
-exog_test.set_index('index', inplace=True)
+exog_test = holiday_test
+exog_test.set_index('date', inplace=True)
 
 train_aggregated = train_merged_data[['index','sales']].copy()
 train_aggregated.set_index('index', inplace=True)
@@ -139,7 +140,7 @@ plt.legend()
 plt.show()
 
 # Initialize the stock level as of the first day of the forecast period
-n = 100
+n = stock['stock'].values[0]
 stock_level, actual_stock_level = n, n
 # stock_level, actual_stock_level = stock['stock'].values[0], stock['stock'].values[0] 
 # Create lists to store stock levels and dates
@@ -147,11 +148,11 @@ actual_stock_levels = [actual_stock_level]
 predicted_stock_levels = [stock_level]  # Initialize with the same initial stock level
 dates = [compare_data.index[0]]
 zero_stock_date = None
-
+minimum_stock = 100
 # Calculate the stock levels for each day of the forecast period
 for i in range(1, forecast_period):
     stock_level -= compare_data['predicted_sales'].iloc[i - 1]  # Decrease stock based on predictions
-    if stock_level <= 0 and zero_stock_date is None:
+    if stock_level <= minimum_stock and zero_stock_date is None:
         zero_stock_date = compare_data.index[i]
     predicted_stock_levels.append(stock_level)  # Store predicted stock level
     actual_stock_level -= test_aggregated['sales'].iloc[i - 1]  # Calculate actual stock level (assuming it decreases by 1 each day)
@@ -164,11 +165,10 @@ plt.figure(figsize=(12, 6))
 # Plot actual stock level
 plt.plot(dates, actual_stock_levels, label='Actual Stock', color='orange')
 
-print(len(predicted_stock_levels))
 # Plot predicted stock level
 plt.plot(dates, predicted_stock_levels, label='Predicted Stock', color='red')
 
-plt.axhline(y=0, color='gray', linestyle='--', label='Zero Stock Level')
+plt.axhline(y=minimum_stock, color='gray', linestyle='--', label='Zero Stock Level')
 if zero_stock_date:
     plt.axvline(x=zero_stock_date, color='blue', linestyle='--', label='Zero Stock Date')
     plt.annotate(
@@ -192,3 +192,58 @@ print("The Mean Squared Error:" + str(mse))
 #calculate the MEAN ABSOLUTE ERROR of the model
 mae = mean_absolute_error(test_aggregated['sales'], compare_data['predicted_sales'])
 print("The Mean Absolute Error:" + str(mae))
+
+exog = holiday
+exog.set_index('date', inplace=True)
+print(exog)
+# Take user input for the number of months before re-stocking
+month_before_restock = int(input("Enter the number of months before re-stocking: "))
+safety_stock = int(input("Enter the minimum safety number: "))
+
+# Calculate the prediction end date by adding the user input to the last date in your test data
+last_date_test = test_aggregated.index[-1] + pd.DateOffset(days=1)
+prediction_end_date = last_date_test + pd.DateOffset(months=month_before_restock)
+
+# Initialize the stock level as of the last date in the test data
+stock_level = actual_stock_level  # Use the last known actual stock level as the initial stock level
+print(actual_stock_level)
+# Create lists to store stock levels and dates
+predicted_stock_levels = []
+dates = []
+
+# Predict stock levels for each day until the specified end date
+while last_date_test < prediction_end_date:
+    # Use the SARIMA model to make the stock level prediction for the current date
+    sarima_forecast_restock = sarima_result.get_forecast(steps=1, exog=exog.loc[last_date_test])
+    
+    predicted_stock_restock = sarima_forecast_restock.predicted_mean[0].round().astype(int)
+
+    # Append the predicted stock level and date to the lists
+    actual_stock_level = actual_stock_level - predicted_stock_restock
+    predicted_stock_levels.append(actual_stock_level)
+    dates.append(last_date_test)
+        
+    # Move to the next day
+    last_date_test += pd.DateOffset(days=1)
+
+
+stock_out = False
+
+# Print the predicted stock levels for each day
+for i in range(len(dates)):
+    print("Predicted stock level for", dates[i].strftime('%d-%m-%Y'), ":", predicted_stock_levels[i])
+
+    if predicted_stock_levels[i] < 0 and not stock_out:
+        stock_out = True
+        stock_out_date = i
+
+        
+# Calculate the total buy order needed to reach the last predicted stock level
+total_buy_order = actual_stock_level
+if total_buy_order < safety_stock:
+    total_buy_order = -actual_stock_level + safety_stock # Running out
+    print("Stock out detected on", dates[stock_out_date].strftime('%d-%m-%Y'))
+    print("Total buy order needed to reach", prediction_end_date.strftime('%d-%m-%Y'), ":", total_buy_order)
+else:
+    print("Still have enough to this date, would be spare : ", actual_stock_level)
+
